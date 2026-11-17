@@ -16,12 +16,12 @@ import pygame
 
 from bugs import BUG_TYPES, SPLAT_SECONDS, Ant, Beetle, Bug, Fly, FruitFly, Grasshopper, Ladybird, make_random_bug
 from game import ROUND_SECONDS, Game, Player
-from main import BUG_BOUNDS, HEIGHT, SCENE, WIDTH, list_classes_with_method
+from main import BUG_BOUNDS, FRAMES_PER_SECOND, HEIGHT, SCENE, WIDTH, list_classes_with_method
 from swatters import SWATTER_TYPES, BugSpray, Chopsticks, FlySwatter, Newspaper, Swatter
 
 BOUNDS = pygame.Rect(100, 100, 400, 300)
 MIDDLE = BOUNDS.center
-FRAME_SECONDS = 1 / 60
+FRAME_SECONDS = 1 / FRAMES_PER_SECOND
 NUMBER_OF_DIRECTIONS = 8
 
 
@@ -88,6 +88,22 @@ class BugTests(unittest.TestCase):
         ant.update(1, BOUNDS)
         self.assertAlmostEqual(ant.x, 200 + Ant.speed)
         self.assertAlmostEqual(ant.y, 200)
+        ant = Ant(200, 200, direction=math.pi / 2)
+        ant.update(1, BOUNDS)
+        self.assertAlmostEqual(ant.x, 200)
+        self.assertAlmostEqual(ant.y, 200 + Ant.speed)
+
+    def test_only_ant_and_beetle_walk_straight(self):
+        """Test that an ant and a beetle keep to a straight line, but the other kinds of bug turn as they go."""
+        for bug in (Ant(MIDDLE[0], MIDDLE[1]), Beetle(MIDDLE[0], MIDDLE[1])):
+            with self.subTest(bug.name):
+                update_for(bug, 10)
+                self.assertAlmostEqual(bug.y, MIDDLE[1])
+        for bug_type in (Fly, FruitFly, Grasshopper, Ladybird):
+            with self.subTest(bug_type.__name__):
+                bug = bug_type(MIDDLE[0], MIDDLE[1])
+                update_for(bug, 10)
+                self.assertNotAlmostEqual(bug.y, MIDDLE[1])
 
     def test_bug_bounces_off_edge(self):
         """Test that a bug that reaches an edge turns back."""
@@ -95,6 +111,10 @@ class BugTests(unittest.TestCase):
         ant.update(1, BOUNDS)
         ant.update(1, BOUNDS)
         self.assertAlmostEqual(ant.x, BOUNDS.right - Ant.speed)
+        ant = Ant(200, BOUNDS.bottom - 1, direction=math.pi / 2)
+        ant.update(1, BOUNDS)
+        ant.update(1, BOUNDS)
+        self.assertAlmostEqual(ant.y, BOUNDS.bottom - Ant.speed)
 
     def test_fruit_fly_is_a_fly(self):
         """Test that a fruit fly is a small, fast fly that inherits the way a fly moves."""
@@ -116,11 +136,11 @@ class BugTests(unittest.TestCase):
         self.assertAlmostEqual(grasshopper.distance_walked, hop_length, delta=Grasshopper.speed * FRAME_SECONDS * 2)
 
     def test_hit_squashes_bug(self):
-        """Test that one hit squashes every kind of bug except a beetle."""
+        """Test that one hit squashes every kind of bug that has only 1 health."""
         for bug in make_bugs():
             with self.subTest(bug.name):
                 bug.take_hit(1)
-                self.assertEqual(bug.is_squashed(), not isinstance(bug, Beetle))
+                self.assertEqual(bug.is_squashed(), bug.max_health == 1)
 
     def test_squashed_bug_stays_still_then_goes(self):
         """Test that a squashed bug does not move, and is gone after SPLAT_SECONDS."""
@@ -175,13 +195,18 @@ class SwatterTests(unittest.TestCase):
                 self.assertTrue(swatter.is_ready())
 
     def test_covers_bug_under_head(self):
-        """Test that every swatter covers a bug right under it, but not one that is far away."""
+        """Test that every swatter covers a bug under it or just inside its edge, but not one below it or far away."""
         bug = Ant(MIDDLE[0], MIDDLE[1])
         far_away = (MIDDLE[0] + 150, MIDDLE[1])
         for swatter in make_swatters():
             with self.subTest(swatter.name):
                 self.assertTrue(swatter.covers(MIDDLE, bug))
                 self.assertFalse(swatter.covers(far_away, bug))
+                # The head is centred on the position, so its edges are half its size away
+                left_bug = Ant(MIDDLE[0] - swatter.width / 2 + 1, MIDDLE[1])
+                below_bug = Ant(MIDDLE[0], MIDDLE[1] + swatter.height / 2 + 1)
+                self.assertTrue(swatter.covers(MIDDLE, left_bug))
+                self.assertFalse(swatter.covers(MIDDLE, below_bug))
 
     def test_fly_swatter_is_square_but_spray_is_round(self):
         """Test that a fly swatter covers a bug in its corner, but bug spray does not."""
@@ -216,7 +241,9 @@ class SwatterTests(unittest.TestCase):
                 bug = Ant(MIDDLE[0], MIDDLE[1])
                 self.assertEqual(swatter.swing(MIDDLE, [bug]), [])
                 self.assertFalse(bug.is_squashed())
-                swatter.update(swatter.seconds_between_swings)
+                swatter.update(swatter.seconds_between_swings / 2)
+                self.assertFalse(swatter.is_ready())
+                swatter.update(swatter.seconds_between_swings / 2)
                 self.assertTrue(swatter.is_ready())
                 self.assertEqual(swatter.swing(MIDDLE, [bug]), [bug])
 
@@ -337,20 +364,18 @@ class GameTests(unittest.TestCase):
         game.add_bug(beetle)
         self.assertEqual(game.swat(MIDDLE), [beetle])
         self.assertEqual(game.player.score, 0)
-        game.update(FlySwatter.seconds_between_swings)
+        game.player.swatter.update(FlySwatter.seconds_between_swings)
         game.swat((beetle.x, beetle.y))
         self.assertEqual(game.player.score, Beetle.points)
 
-    def test_update_moves_bugs_and_readies_swatter(self):
-        """Test that updating the game moves its bugs, counts down the time and readies the player's swatter."""
+    def test_update_moves_bugs(self):
+        """Test that updating the game moves its bugs and counts down the time."""
         game = Game(Player(FlySwatter()), BOUNDS)
         ant = Ant(MIDDLE[0], MIDDLE[1])
         game.add_bug(ant)
-        game.player.swatter.swing(BOUNDS.topleft, [])
         game.update(1)
         self.assertAlmostEqual(ant.x, MIDDLE[0] + Ant.speed)
         self.assertAlmostEqual(game.seconds_left, ROUND_SECONDS - 1)
-        self.assertTrue(game.player.swatter.is_ready())
 
     def test_game_ends_when_time_runs_out(self):
         """Test that nothing moves and nothing can be swatted once the time is up."""
@@ -426,7 +451,7 @@ class MethodTests(unittest.TestCase):
         self.assertEqual(list_classes_with_method(BugSpray(), "covers"), ["BugSpray", "Swatter"])
         self.assertEqual(list_classes_with_method(Chopsticks(), "covers"), ["Swatter"])
 
-    def test_every_swatter_is_a_swatter(self):
+    def test_every_kind_inherits_from_base_class(self):
         """Test that every kind of swatter and bug inherits from its base class."""
         for swatter in make_swatters():
             self.assertIsInstance(swatter, Swatter)

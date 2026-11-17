@@ -33,7 +33,7 @@ DARK_COLOUR = (30, 30, 30)
 LEG_COLOUR = (40, 35, 35)
 EYE_COLOUR = (205, 40, 40)
 CRACK_COLOUR = (235, 235, 215)
-OVAL_POINTS = 16
+NUMBER_OF_OVAL_POINTS = 16
 SIDES = (-1, 1)  # left and right
 # How far forwards each pair of legs is, as fractions of the bug's size
 LEG_POSITIONS = (0.25, 0.0, -0.25)
@@ -56,13 +56,13 @@ MAX_START_TURN = 0.6  # radians
 def calculate_oval(centre, angle, length, width):
     """Calculate the points around an oval that is length long in the direction angle (radians) and width wide."""
     along_x, along_y = math.cos(angle), math.sin(angle)
-    points = []
-    for i in range(OVAL_POINTS):
-        angle_around = 2 * math.pi * i / OVAL_POINTS
+    outline = []
+    for i in range(NUMBER_OF_OVAL_POINTS):
+        angle_around = 2 * math.pi * i / NUMBER_OF_OVAL_POINTS
         along = math.cos(angle_around) * length / 2
         across = math.sin(angle_around) * width / 2
-        points.append((centre[0] + along_x * along - along_y * across, centre[1] + along_y * along + along_x * across))
-    return points
+        outline.append((centre[0] + along_x * along - along_y * across, centre[1] + along_y * along + along_x * across))
+    return outline
 
 
 def make_random_bug(bounds):
@@ -98,7 +98,8 @@ class Bug:
     speed = 60  # pixels per second
     size = 20  # pixels from head to tail
     colour = (95, 75, 55)
-    leg_reach = 0.5  # how far the feet are from the middle of the bug, as a fraction of its size
+    # How far the feet are from the middle of the bug, as a fraction of its size
+    leg_reach = 0.5
     splat_colour = (160, 180, 70)
 
     def __init__(self, x, y, direction=0.0):
@@ -157,12 +158,12 @@ class Bug:
             self.direction = -self.direction
             self.y = max(bounds.top, min(self.y, bounds.bottom))
 
-    def calculate_point(self, forwards, sideways=0.0):
-        """Calculate the (x, y) point on the screen for a point on the bug.
+    def calculate_position(self, forwards, sideways=0.0):
+        """Calculate the (x, y) position on the screen of a point on the bug.
 
         forwards is how far the point is towards the bug's head from its
         middle and sideways is how far it is to the bug's right. Both are
-        fractions of the bug's size, so the point turns and scales with the bug.
+        fractions of the bug's size, so the position turns and scales with the bug.
         """
         forwards_x = math.cos(self.direction)
         forwards_y = math.sin(self.direction)
@@ -207,23 +208,23 @@ class Bug:
         length and width are fractions of the bug's size.
         turn is how far the oval is turned from the way the bug is facing, in radians.
         """
-        centre = self.calculate_point(forwards, sideways)
+        centre = self.calculate_position(forwards, sideways)
         outline = calculate_oval(centre, self.direction + turn, length * self.size, width * self.size)
         pygame.draw.polygon(surface, colour, outline)
 
     def draw_circle(self, surface, colour, forwards, radius, sideways=0.0):
         """Draw a circle on the bug at the (forwards, sideways) point, where radius is a fraction of the bug's size."""
-        pygame.draw.circle(surface, colour, self.calculate_point(forwards, sideways), max(1, radius * self.size))
+        pygame.draw.circle(surface, colour, self.calculate_position(forwards, sideways), max(1, radius * self.size))
 
     def draw_line(self, surface, colour, start, end, width=1):
         """Draw a line on the bug from start to end, which are (forwards, sideways) points."""
-        start_point = self.calculate_point(start[0], start[1])
-        end_point = self.calculate_point(end[0], end[1])
+        start_point = self.calculate_position(start[0], start[1])
+        end_point = self.calculate_position(end[0], end[1])
         pygame.draw.line(surface, colour, start_point, end_point, width)
 
 
 class Ant(Bug):
-    """A small bug that marches in a straight line, the way every Bug moves."""
+    """A small bug that marches in a straight line. It has no move() of its own, so it inherits Bug's."""
 
     name = "Ant"
     points = 5
@@ -313,7 +314,7 @@ class Beetle(Bug):
         self.draw_line(surface, self.seam_colour, (0.28, 0), (-0.48, 0))
         self.draw_oval(surface, self.shine_colour, 0.05, 0.3, 0.07, sideways=-0.17)
         if self.is_cracked():
-            crack = [self.calculate_point(forwards, sideways) for forwards, sideways in CRACK_POINTS]
+            crack = [self.calculate_position(forwards, sideways) for forwards, sideways in CRACK_POINTS]
             pygame.draw.lines(surface, CRACK_COLOUR, False, crack, 2)
 
 

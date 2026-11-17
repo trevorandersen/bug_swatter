@@ -90,7 +90,6 @@ class Game:
         """Move the game on by seconds, unless it is over."""
         if not self.is_over():
             self.seconds_left = max(0, self.seconds_left - seconds)
-            self.player.swatter.update(seconds)
             # Polymorphism: each bug moves in its own way
             for bug in self.bugs:
                 bug.update(seconds, self.bounds)

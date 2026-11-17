@@ -19,6 +19,7 @@ Run the tests with:
     python -m unittest
 """
 
+import math
 from collections import Counter
 
 import pygame
@@ -31,9 +32,10 @@ WIDTH = 1100
 HEIGHT = 720
 PANEL_WIDTH = 280
 MARGIN = 20
-SCENE = pygame.Rect(PANEL_WIDTH, 0, WIDTH - PANEL_WIDTH, 500)
+SCENE = pygame.Rect(PANEL_WIDTH, 0, WIDTH - PANEL_WIDTH, 470)
 INFO = pygame.Rect(PANEL_WIDTH, SCENE.bottom, WIDTH - PANEL_WIDTH, HEIGHT - SCENE.bottom)
-BUG_MARGIN = 30  # bugs stay this far inside the scene so that all of each bug can be seen
+# Bugs stay this far inside the scene so that all of each bug can be seen
+BUG_MARGIN = 30
 BUG_BOUNDS = SCENE.inflate(-2 * BUG_MARGIN, -2 * BUG_MARGIN)
 FRAMES_PER_SECOND = 60
 MILLISECONDS_PER_SECOND = 1000
@@ -51,12 +53,14 @@ BUG_METHOD_NAMES = ("move", "take_hit", "draw_body")
 # Side panel layout, in pixels
 BUTTON_WIDTH = PANEL_WIDTH - 2 * MARGIN
 SWATTER_BUTTONS_TOP = 128
-SWATTER_BUTTON_SPACING = 48
+MAX_SWATTER_BUTTON_SPACING = 48
 SWATTER_BUTTON_GAP = 8
 SECTION_GAP = 12
 HEADING_OFFSET = 27  # how far a section's heading is above the first thing in it
 HEADING_HEIGHT = 26
 LINE_HEIGHT = 20
+DETAIL_LINE_HEIGHT = 22
+NUMBER_OF_DETAIL_LINES = 3  # the lines about the player's swatter, under the buttons
 SCORE_TOP = 512
 TIME_TOP = SCORE_TOP + 40
 TIME_BAR_TOP = TIME_TOP + 24
@@ -69,8 +73,8 @@ KEY_HINTS_TOP = HEIGHT - 46
 # Info panel layout, in pixels
 INFO_TOP = INFO.top + 10
 LEGEND_WIDTH = 400
-LEGEND_TOP = INFO_TOP + 42
-LEGEND_ROW_HEIGHT = 30
+LEGEND_TOP = INFO_TOP + 24
+MAX_LEGEND_ROW_HEIGHT = 36
 LEGEND_PICTURE_X = INFO.left + MARGIN + 18
 LEGEND_NAME_X = LEGEND_PICTURE_X + 34
 LEGEND_POINTS_X = LEGEND_NAME_X + 112
@@ -150,18 +154,26 @@ class App:
 
         # Aggregation: the swatters are made here, once, and every player of every game uses these same ones
         self.swatters = [swatter_type() for swatter_type in SWATTER_TYPES]
+        # Shrink the swatter buttons if there are so many kinds of swatter that the side panel would overflow.
+        # Every class has object at the end of its __mro__, which the class hierarchy does not show.
+        number_of_hierarchy_lines = max(len(swatter_type.__mro__) for swatter_type in SWATTER_TYPES) - 1
+        height_below_swatter_buttons = (SECTION_GAP + NUMBER_OF_DETAIL_LINES * DETAIL_LINE_HEIGHT + SECTION_GAP
+                                        + HEADING_HEIGHT + LINE_HEIGHT * number_of_hierarchy_lines)
+        available_height = SCORE_TOP - HEADING_OFFSET - SWATTER_BUTTONS_TOP - height_below_swatter_buttons
+        spacing = min(MAX_SWATTER_BUTTON_SPACING, available_height // len(SWATTER_TYPES))
         self.swatter_buttons = []
         for i, swatter in enumerate(self.swatters):
-            rect = (MARGIN, SWATTER_BUTTONS_TOP + i * SWATTER_BUTTON_SPACING, BUTTON_WIDTH,
-                    SWATTER_BUTTON_SPACING - SWATTER_BUTTON_GAP)
+            rect = (MARGIN, SWATTER_BUTTONS_TOP + i * spacing, BUTTON_WIDTH, spacing - SWATTER_BUTTON_GAP)
             self.swatter_buttons.append(Button(rect, swatter.name))
         new_game_rect = (MARGIN, NEW_GAME_BUTTON_TOP, BUTTON_WIDTH, NEW_GAME_BUTTON_HEIGHT)
         self.new_game_button = Button(new_game_rect, "New game")
 
-        # One bug of each kind, facing right, to be the pictures in the list of bugs
+        # One bug of each kind, facing right, to be the pictures in the list of bugs.
+        # Shrink the rows if there are so many kinds of bug that the list would overflow.
+        row_height = min(MAX_LEGEND_ROW_HEIGHT, (INFO.bottom - LEGEND_TOP) // len(BUG_TYPES))
         self.sample_bugs = []
         for i, bug_type in enumerate(BUG_TYPES):
-            y = LEGEND_TOP + i * LEGEND_ROW_HEIGHT
+            y = LEGEND_TOP + i * row_height + row_height // 2
             self.sample_bugs.append(bug_type(LEGEND_PICTURE_X, y))
 
         self.selected_index = 0
@@ -194,7 +206,7 @@ class App:
 
     def start_game(self):
         """Start a new game, with a new player who is holding the selected swatter."""
-        # Aggregation: the swatter, the player and the bugs are all made here, then handed over
+        # Aggregation: the new player is handed a swatter from the rack, then the game is handed the player
         player = Player(self.swatters[self.selected_index])
         self.game = Game(player, BUG_BOUNDS)
         for _ in range(NUMBER_OF_STARTING_BUGS):
@@ -212,6 +224,9 @@ class App:
     def update(self, seconds):
         """Move the game on by seconds, and let another bug in when it is time for one."""
         self.popup_seconds_left = max(0, self.popup_seconds_left - seconds)
+        # Every swatter in the rack gets ready again, whether or not the player is holding it
+        for swatter in self.swatters:
+            swatter.update(seconds)
         if self.game.is_over():
             self.best_score = max(self.best_score, self.game.player.score)
         else:
@@ -351,19 +366,19 @@ class App:
 
         y = self.swatter_buttons[-1].rect.bottom + SECTION_GAP
         self.draw_text(swatter.description, (MARGIN, y), self.font)
-        y += LINE_HEIGHT + 2
+        y += DETAIL_LINE_HEIGHT
         details = f"Power {swatter.power}, ready again in {swatter.seconds_between_swings} s"
         self.draw_text(details, (MARGIN, y), self.small_font, MUTED_COLOUR)
-        y += LINE_HEIGHT + 2
+        y += DETAIL_LINE_HEIGHT
         self.draw_text(f"player.swatter is swatters[{self.selected_index}]", (MARGIN, y), self.code_font, ACCENT_COLOUR)
 
-        y += LINE_HEIGHT + SECTION_GAP
+        y += DETAIL_LINE_HEIGHT + SECTION_GAP
         self.draw_text("Class hierarchy", (MARGIN, y), self.heading_font)
         self.draw_class_hierarchy(swatter, MARGIN, y + HEADING_HEIGHT)
 
         self.draw_text("2. Swat the bugs", (MARGIN, SCORE_TOP - HEADING_OFFSET), self.heading_font)
         self.draw_text(f"Score: {player.score}", (MARGIN, SCORE_TOP), self.title_font, ACCENT_COLOUR)
-        self.draw_text(f"Time left: {self.game.seconds_left:.0f} s", (MARGIN, TIME_TOP), self.font)
+        self.draw_text(f"Time left: {math.ceil(self.game.seconds_left)} s", (MARGIN, TIME_TOP), self.font)
         time_bar = pygame.Rect(MARGIN, TIME_BAR_TOP, BUTTON_WIDTH, PROGRESS_BAR_HEIGHT)
         pygame.draw.rect(self.screen, DISABLED_COLOUR, time_bar, border_radius=4)
         filled_width = round(time_bar.width * self.game.seconds_left / ROUND_SECONDS)

@@ -32,7 +32,7 @@ WIDTH = 1100
 HEIGHT = 720
 PANEL_WIDTH = 280
 MARGIN = 20
-SCENE = pygame.Rect(PANEL_WIDTH, 0, WIDTH - PANEL_WIDTH, 470)
+SCENE = pygame.Rect(PANEL_WIDTH, 0, WIDTH - PANEL_WIDTH, 440)
 INFO = pygame.Rect(PANEL_WIDTH, SCENE.bottom, WIDTH - PANEL_WIDTH, HEIGHT - SCENE.bottom)
 # Bugs stay this far inside the scene so that all of each bug can be seen
 BUG_MARGIN = 30
@@ -78,7 +78,7 @@ MAX_LEGEND_ROW_HEIGHT = 36
 LEGEND_PICTURE_X = INFO.left + MARGIN + 18
 LEGEND_NAME_X = LEGEND_PICTURE_X + 34
 LEGEND_POINTS_X = LEGEND_NAME_X + 112
-LEGEND_COUNT_X = LEGEND_POINTS_X + 100
+LEGEND_COUNT_X = LEGEND_POINTS_X + 135
 LAST_SWAT_LEFT = INFO.left + LEGEND_WIDTH + MARGIN
 GAME_OVER_SIZE = (420, 150)
 
@@ -411,7 +411,7 @@ class App:
             text_top = sample_bug.y - LINE_HEIGHT / 2
             self.draw_text(class_name, (LEGEND_NAME_X, text_top + 1), self.code_font, MUTED_COLOUR)
             points_colour = TEXT_COLOUR if sample_bug.points > 0 else WARNING_COLOUR
-            self.draw_text(f"{sample_bug.points:+} points", (LEGEND_POINTS_X, text_top), self.font, points_colour)
+            self.draw_text(sample_bug.describe_points(), (LEGEND_POINTS_X, text_top), self.font, points_colour)
             count = class_name_to_count[class_name]
             if count > 0:
                 self.draw_text(f"{count} in play", (LEGEND_COUNT_X, text_top), self.font, MUTED_COLOUR)

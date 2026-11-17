@@ -8,7 +8,8 @@ Inheritance:
     │   └── FruitFly        inherits from Fly, which inherits from Bug
     ├── Beetle              has a shell, so it takes two hits
     ├── Grasshopper         sits still, then leaps
-    └── Ladybird            friendly: swatting one loses points
+    ├── Ladybird            friendly: swatting one loses points
+    └── RandomisedBug       a different, made-up bug every time
 
 Polymorphism:
     Every kind of bug has update(), take_hit() and draw() methods, but each
@@ -33,6 +34,7 @@ DARK_COLOUR = (30, 30, 30)
 LEG_COLOUR = (40, 35, 35)
 EYE_COLOUR = (205, 40, 40)
 CRACK_COLOUR = (235, 235, 215)
+WING_COLOUR = (165, 190, 215)
 NUMBER_OF_OVAL_POINTS = 16
 SIDES = (-1, 1)  # left and right
 # How far forwards each pair of legs is, as fractions of the bug's size
@@ -51,6 +53,10 @@ LADYBIRD_TURN_SPEED = 1.5  # radians per second
 LADYBIRD_BEND_LENGTH = 30  # pixels
 EDGES = ("left", "right", "top", "bottom")
 MAX_START_TURN = 0.6  # radians
+# A RandomisedBug is worth between these numbers of points, in steps of POINTS_STEP
+MIN_RANDOM_POINTS = 5
+MAX_RANDOM_POINTS = 40
+POINTS_STEP = 5
 
 
 def calculate_oval(centre, angle, length, width):
@@ -63,6 +69,16 @@ def calculate_oval(centre, angle, length, width):
         across = math.sin(angle_around) * width / 2
         outline.append((centre[0] + along_x * along - along_y * across, centre[1] + along_y * along + along_x * across))
     return outline
+
+
+def choose_random_colour(random_generator, hue_range=(0, 360), saturation_range=(40, 100), value_range=(70, 100)):
+    """Choose a random colour with its hue (0-360), saturation and brightness (0-100) in the given ranges."""
+    hue = random_generator.uniform(hue_range[0], hue_range[1])
+    saturation = random_generator.uniform(saturation_range[0], saturation_range[1])
+    value = random_generator.uniform(value_range[0], value_range[1])
+    colour = pygame.Color(0)
+    colour.hsva = (hue, saturation, value, 100)
+    return colour.r, colour.g, colour.b
 
 
 def make_random_bug(bounds):
@@ -120,6 +136,14 @@ class Bug:
     def is_squashed(self):
         """Determine if the bug has been squashed."""
         return self.health <= 0
+
+    def describe_points(self):
+        """Describe how many points this kind of bug is worth, like "+10 points"."""
+        return f"{self.points:+} points"
+
+    def is_cracked(self):
+        """Determine if the bug has lost some of its health without being squashed."""
+        return 0 < self.health < self.max_health
 
     def is_gone(self):
         """Determine if the bug was squashed so long ago that it can be cleared away."""
@@ -202,6 +226,21 @@ class Bug:
         for forwards, sideways, radius in SPLAT_BLOBS:
             self.draw_circle(surface, self.splat_colour, forwards, radius, sideways)
 
+    def draw_wings(self, surface):
+        """Draw two wings folded back over the bug, for the kinds of bug that have them."""
+        for side in SIDES:
+            self.draw_oval(surface, WING_COLOUR, -0.2, 0.75, 0.3, sideways=side * 0.28, turn=-side * 0.5)
+
+    def draw_crack(self, surface):
+        """Draw a crack across the bug's back, for the kinds of bug that can be hit without being squashed."""
+        crack = [self.calculate_position(forwards, sideways) for forwards, sideways in CRACK_POINTS]
+        pygame.draw.lines(surface, CRACK_COLOUR, False, crack, 2)
+
+    def draw_antennae(self, surface):
+        """Draw two short antennae on the bug's head, for the kinds of bug that have them."""
+        for side in SIDES:
+            self.draw_line(surface, LEG_COLOUR, (0.42, side * 0.06), (0.62, side * 0.22))
+
     def draw_oval(self, surface, colour, forwards, length, width, sideways=0.0, turn=0.0):
         """Draw an oval on the bug, with its middle at the (forwards, sideways) point.
 
@@ -236,8 +275,7 @@ class Ant(Bug):
         self.draw_oval(surface, self.colour, -0.28, 0.44, 0.3)
         self.draw_circle(surface, self.colour, 0.05, 0.11)
         self.draw_circle(surface, self.colour, 0.33, 0.15)
-        for side in SIDES:
-            self.draw_line(surface, self.colour, (0.42, side * 0.06), (0.62, side * 0.22))
+        self.draw_antennae(surface)
 
 
 class Fly(Bug):
@@ -248,7 +286,6 @@ class Fly(Bug):
     size = 16
     colour = (55, 60, 70)
     leg_reach = 0.4
-    wing_colour = (165, 190, 215)
     turns_per_second = 4  # how often it changes direction, on average
 
     def move(self, seconds, bounds):
@@ -260,8 +297,7 @@ class Fly(Bug):
     def draw_body(self, surface):
         """Draw a body with two wings folded back over it."""
         self.draw_oval(surface, self.colour, -0.08, 0.8, 0.4)
-        for side in SIDES:
-            self.draw_oval(surface, self.wing_colour, -0.2, 0.75, 0.3, sideways=side * 0.28, turn=-side * 0.5)
+        self.draw_wings(surface)
         self.draw_circle(surface, self.colour, 0.38, 0.17)
 
 
@@ -297,10 +333,6 @@ class Beetle(Bug):
     seam_colour = (25, 60, 50)
     shine_colour = (120, 180, 160)
 
-    def is_cracked(self):
-        """Determine if the shell has been hit."""
-        return self.health < self.max_health
-
     def take_hit(self, power):
         """Take a hit like any bug, then turn around if the shell held."""
         super().take_hit(power)
@@ -314,8 +346,7 @@ class Beetle(Bug):
         self.draw_line(surface, self.seam_colour, (0.28, 0), (-0.48, 0))
         self.draw_oval(surface, self.shine_colour, 0.05, 0.3, 0.07, sideways=-0.17)
         if self.is_cracked():
-            crack = [self.calculate_position(forwards, sideways) for forwards, sideways in CRACK_POINTS]
-            pygame.draw.lines(surface, CRACK_COLOUR, False, crack, 2)
+            self.draw_crack(surface)
 
 
 class Grasshopper(Bug):
@@ -391,5 +422,88 @@ class Ladybird(Bug):
                 self.draw_circle(surface, DARK_COLOUR, forwards, 0.07, sideways=side * sideways)
 
 
+class RandomisedBug(Bug):
+    """A made-up bug whose features are chosen at random.
+
+    The rest of the program cannot tell the difference: it still just calls
+    bug.update(seconds, bounds) and bug.draw(surface). That is polymorphism.
+
+    Every random choice comes from the bug's own random_generator, which
+    starts from seed, so RandomisedBug(x, y, seed=1234) looks and moves the
+    same way every time. Leave the seed out to get a different bug each time.
+    """
+
+    name = "Random bug"
+
+    def __init__(self, x, y, direction=0.0, seed=None):
+        """Initialise a RandomisedBug at (x, y) and choose what it looks like and how it moves."""
+        super().__init__(x, y, direction)
+        self.seed = seed if seed is not None else random.randint(1000, 9999)
+        self.random_generator = random.Random(self.seed)
+        random_generator = self.random_generator
+        # This object's name hides the class's name
+        self.name = f"Random bug #{self.seed}"
+
+        # These are class variables in the other bugs; setting them on self
+        # gives this one bug its own values
+        self.max_health = random_generator.choice([1, 1, 1, 2])
+        # Bug.__init__() has already set the health from the class's max_health
+        self.health = self.max_health
+        self.speed = random_generator.randint(40, 200)
+        self.size = random_generator.randint(12, 28)
+        self.leg_reach = random_generator.uniform(0.35, 0.55)
+        # No random bug is red, so that none can be mistaken for a Ladybird
+        self.colour = choose_random_colour(random_generator, hue_range=(30, 330), saturation_range=(45, 90),
+                                           value_range=(35, 80))
+        # Fast, small and tough bugs are harder to squash, so they are worth more points
+        difficulty = self.speed / self.size * self.max_health
+        points = POINTS_STEP * round(difficulty / 4)
+        self.points = max(MIN_RANDOM_POINTS, min(MAX_RANDOM_POINTS, points))
+
+        self.turns_per_second = random_generator.uniform(0, 6)
+        self.max_turn = random_generator.uniform(0.3, 1.2)  # radians
+
+        # The body and head measurements are fractions of the bug's size
+        self.body_length = random_generator.uniform(0.6, 0.8)
+        self.body_width = random_generator.uniform(0.25, 0.7)
+        self.head_size = random_generator.uniform(0.12, 0.18)
+        self.has_wings = random_generator.random() < 0.4
+        self.has_antennae = random_generator.random() < 0.6
+        self.spot_colour = choose_random_colour(random_generator, saturation_range=(10, 50), value_range=(85, 100))
+        # Each spot is (forwards, sideways), somewhere on the body
+        self.spots = []
+        number_of_spots = random_generator.randint(0, 4)
+        for _ in range(number_of_spots):
+            forwards = random_generator.uniform(-0.35, 0.15)
+            sideways = random_generator.uniform(-0.3, 0.3) * self.body_width
+            self.spots.append((forwards, sideways))
+
+    def describe_points(self):
+        """Describe the range of points that random bugs are worth, because each one is different."""
+        return f"+{MIN_RANDOM_POINTS} to +{MAX_RANDOM_POINTS} points"
+
+    def move(self, seconds, bounds):
+        """Walk forwards, changing direction as often and as sharply as this bug does."""
+        if self.random_generator.random() < self.turns_per_second * seconds:
+            self.direction += self.random_generator.uniform(-self.max_turn, self.max_turn)
+        super().move(seconds, bounds)
+
+    def draw_body(self, surface):
+        """Draw a body of this bug's own shape and colour, with spots, wings and antennae if it has them.
+
+        A random bug with 2 health gets a crack across its back when it is first hit.
+        """
+        self.draw_oval(surface, self.colour, -0.1, self.body_length, self.body_width)
+        for forwards, sideways in self.spots:
+            self.draw_circle(surface, self.spot_colour, forwards, 0.06, sideways=sideways)
+        if self.has_wings:
+            self.draw_wings(surface)
+        if self.is_cracked():
+            self.draw_crack(surface)
+        self.draw_circle(surface, DARK_COLOUR, 0.35, self.head_size)
+        if self.has_antennae:
+            self.draw_antennae(surface)
+
+
 # The kinds of bug that can turn up (this must come after the classes it lists)
-BUG_TYPES = [Ant, Fly, FruitFly, Beetle, Grasshopper, Ladybird]
+BUG_TYPES = [Ant, Fly, FruitFly, Beetle, Grasshopper, Ladybird, RandomisedBug]

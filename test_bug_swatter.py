@@ -14,7 +14,8 @@ import unittest
 
 import pygame
 
-from bugs import BUG_TYPES, SPLAT_SECONDS, Ant, Beetle, Bug, Fly, FruitFly, Grasshopper, Ladybird, make_random_bug
+from bugs import (BUG_TYPES, MAX_RANDOM_POINTS, MIN_RANDOM_POINTS, POINTS_STEP, SPLAT_SECONDS, Ant, Beetle, Bug, Fly,
+                  FruitFly, Grasshopper, Ladybird, RandomisedBug, make_random_bug)
 from game import ROUND_SECONDS, Game, Player
 from main import BUG_BOUNDS, FRAMES_PER_SECOND, HEIGHT, SCENE, WIDTH, list_classes_with_method
 from swatters import SWATTER_TYPES, BugSpray, Chopsticks, FlySwatter, Newspaper, Swatter
@@ -23,6 +24,7 @@ BOUNDS = pygame.Rect(100, 100, 400, 300)
 MIDDLE = BOUNDS.center
 FRAME_SECONDS = 1 / FRAMES_PER_SECOND
 NUMBER_OF_DIRECTIONS = 8
+RANDOM_SEEDS = range(50)
 
 
 def make_bugs(position=MIDDLE):
@@ -41,6 +43,11 @@ def update_for(bug, seconds):
     number_of_frames = round(seconds / FRAME_SECONDS)
     for _ in range(number_of_frames):
         bug.update(FRAME_SECONDS, BOUNDS)
+
+
+def summarise_features(bug):
+    """Summarise a bug's features as (name, value) pairs, leaving out its random generator, its seed and its name."""
+    return [(name, value) for name, value in vars(bug).items() if name not in ("random_generator", "seed", "name")]
 
 
 def draw_picture(bug):
@@ -93,8 +100,8 @@ class BugTests(unittest.TestCase):
         self.assertAlmostEqual(ant.x, 200)
         self.assertAlmostEqual(ant.y, 200 + Ant.speed)
 
-    def test_only_ant_and_beetle_walk_straight(self):
-        """Test that an ant and a beetle keep to a straight line, but the other kinds of bug turn as they go."""
+    def test_ant_and_beetle_walk_straight(self):
+        """Test that an ant and a beetle keep to a straight line, but flies, grasshoppers and ladybirds turn."""
         for bug in (Ant(MIDDLE[0], MIDDLE[1]), Beetle(MIDDLE[0], MIDDLE[1])):
             with self.subTest(bug.name):
                 update_for(bug, 10)
@@ -176,13 +183,139 @@ class BugTests(unittest.TestCase):
         self.assertEqual(str(FruitFly(200, 200)), "Fruit fly (1 of 1 health)")
 
     def test_make_random_bug(self):
-        """Test that random bugs are of every kind and each starts on an edge of the bounds."""
+        """Test that make_random_bug() makes every kind of bug, each on an edge of the bounds."""
         bugs = [make_random_bug(BOUNDS) for _ in range(300)]
         self.assertEqual({type(bug) for bug in bugs}, set(BUG_TYPES))
         for bug in bugs:
             is_on_side = bug.x in (BOUNDS.left, BOUNDS.right) and BOUNDS.top <= bug.y <= BOUNDS.bottom
             is_on_end = bug.y in (BOUNDS.top, BOUNDS.bottom) and BOUNDS.left <= bug.x <= BOUNDS.right
             self.assertTrue(is_on_side or is_on_end, f"({bug.x}, {bug.y}) is not on an edge")
+
+
+class RandomisedBugTests(unittest.TestCase):
+    """Tests that random bugs are repeatable when given a seed, and follow the same rules as the other bugs."""
+
+    def test_same_seed_makes_same_bug(self):
+        """Test that two bugs with the same seed have the same features, look the same and move the same way."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                first_bug = RandomisedBug(SCENE.centerx, SCENE.centery, seed=seed)
+                second_bug = RandomisedBug(SCENE.centerx, SCENE.centery, seed=seed)
+                self.assertEqual(summarise_features(first_bug), summarise_features(second_bug))
+                self.assertEqual(pygame.image.tobytes(draw_picture(first_bug), "RGBA"),
+                                 pygame.image.tobytes(draw_picture(second_bug), "RGBA"))
+                update_for(first_bug, 5)
+                update_for(second_bug, 5)
+                self.assertEqual(summarise_features(first_bug), summarise_features(second_bug))
+
+    def test_different_seeds_make_different_bugs(self):
+        """Test that no two seeds make bugs with exactly the same features."""
+        summaries = {str(summarise_features(RandomisedBug(0, 0, seed=seed))) for seed in RANDOM_SEEDS}
+        self.assertEqual(len(summaries), len(RANDOM_SEEDS))
+
+    def test_no_seed_chooses_one(self):
+        """Test that bugs made without a seed choose different seeds for themselves."""
+        seeds = {RandomisedBug(0, 0).seed for _ in range(20)}
+        self.assertGreater(len(seeds), 1)
+
+    def test_random_bugs_are_varied(self):
+        """Test that some random bugs have wings, antennae, spots or two health, and some do not."""
+        bugs = [RandomisedBug(0, 0, seed=seed) for seed in RANDOM_SEEDS]
+        self.assertEqual({bug.has_wings for bug in bugs}, {True, False})
+        self.assertEqual({bug.has_antennae for bug in bugs}, {True, False})
+        self.assertEqual({bug.max_health for bug in bugs}, {1, 2})
+        self.assertEqual({len(bug.spots) > 0 for bug in bugs}, {True, False})
+
+    def test_new_random_bug_has_all_of_its_own_health(self):
+        """Test that a random bug starts with the max_health that was chosen for it, not the one in its class."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                bug = RandomisedBug(0, 0, seed=seed)
+                self.assertEqual(bug.health, bug.max_health)
+                bug.take_hit(bug.max_health)
+                self.assertTrue(bug.is_squashed())
+
+    def test_hit_random_bug_looks_different(self):
+        """Test that a random bug with 2 health is cracked, but not squashed, by its first hit."""
+        bugs = [RandomisedBug(SCENE.centerx, SCENE.centery, seed=seed) for seed in RANDOM_SEEDS]
+        tough_bugs = [bug for bug in bugs if bug.max_health == 2]
+        self.assertGreater(len(tough_bugs), 0)
+        for bug in tough_bugs:
+            with self.subTest(bug.name):
+                picture_before = pygame.image.tobytes(draw_picture(bug), "RGBA")
+                bug.take_hit(1)
+                self.assertTrue(bug.is_cracked())
+                self.assertFalse(bug.is_squashed())
+                self.assertNotEqual(pygame.image.tobytes(draw_picture(bug), "RGBA"), picture_before)
+
+    def test_random_bug_turns_as_often_as_it_says(self):
+        """Test that a random bug walks straight if it never turns, and wanders off if it turns in every frame."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                straight_bug = RandomisedBug(MIDDLE[0], MIDDLE[1], seed=seed)
+                straight_bug.turns_per_second = 0
+                update_for(straight_bug, 10)
+                self.assertAlmostEqual(straight_bug.y, MIDDLE[1])
+                turning_bug = RandomisedBug(MIDDLE[0], MIDDLE[1], seed=seed)
+                turning_bug.turns_per_second = FRAMES_PER_SECOND
+                update_for(turning_bug, 10)
+                self.assertNotAlmostEqual(turning_bug.y, MIDDLE[1])
+
+    def test_points_are_in_range(self):
+        """Test that every random bug is worth a whole number of steps of points, inside the range it describes."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                bug = RandomisedBug(0, 0, seed=seed)
+                self.assertTrue(MIN_RANDOM_POINTS <= bug.points <= MAX_RANDOM_POINTS, f"{bug.points} points")
+                self.assertEqual(bug.points % POINTS_STEP, 0)
+                self.assertEqual(bug.describe_points(), "+5 to +40 points")
+
+    def test_harder_bugs_are_worth_more(self):
+        """Test that the random bug that is hardest to squash is worth more than the one that is easiest."""
+        bugs = [RandomisedBug(0, 0, seed=seed) for seed in RANDOM_SEEDS]
+        difficulties = [bug.speed / bug.size * bug.max_health for bug in bugs]
+        hardest_bug = bugs[difficulties.index(max(difficulties))]
+        easiest_bug = bugs[difficulties.index(min(difficulties))]
+        self.assertGreater(hardest_bug.points, easiest_bug.points)
+
+    def test_other_bugs_describe_their_own_points(self):
+        """Test that the other kinds of bug describe exactly the points they are worth."""
+        self.assertEqual(Ant(0, 0).describe_points(), "+5 points")
+        self.assertEqual(Ladybird(0, 0).describe_points(), "-20 points")
+
+    def test_squashing_random_bug_scores_its_own_points(self):
+        """Test that a game scores the points chosen for a random bug, like any other bug."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                game = Game(Player(Newspaper()), BOUNDS)
+                bug = RandomisedBug(MIDDLE[0], MIDDLE[1], seed=seed)
+                game.add_bug(bug)
+                game.swat(MIDDLE)
+                self.assertEqual(game.player.score, bug.points)
+
+    def test_random_bugs_stay_in_bounds(self):
+        """Test that no random bug ever leaves the bounds."""
+        for seed in RANDOM_SEEDS:
+            with self.subTest(seed=seed):
+                bug = RandomisedBug(MIDDLE[0], MIDDLE[1], seed=seed)
+                number_of_frames = 600
+                for _ in range(number_of_frames):
+                    bug.update(FRAME_SECONDS, BOUNDS)
+                    self.assertTrue(BOUNDS.left <= bug.x <= BOUNDS.right, f"x is {bug.x}")
+                    self.assertTrue(BOUNDS.top <= bug.y <= BOUNDS.bottom, f"y is {bug.y}")
+                self.assertGreater(bug.distance_walked, 0)
+
+    def test_random_bugs_fit_in_scene(self):
+        """Test that every random bug is drawn completely inside the scene, even in its corners."""
+        corners = (BUG_BOUNDS.topleft, BUG_BOUNDS.bottomright)
+        for seed in RANDOM_SEEDS:
+            for i, corner in enumerate(corners):
+                with self.subTest(seed=seed, corner=corner):
+                    direction = 2 * math.pi * (seed + i) / NUMBER_OF_DIRECTIONS
+                    bug = RandomisedBug(corner[0], corner[1], direction, seed)
+                    drawn_area = draw_picture(bug).get_bounding_rect()
+                    self.assertGreater(drawn_area.width, 0)
+                    self.assertTrue(SCENE.contains(drawn_area), f"{drawn_area} is outside {SCENE}")
 
 
 class SwatterTests(unittest.TestCase):
@@ -450,6 +583,9 @@ class MethodTests(unittest.TestCase):
         self.assertEqual(list_classes_with_method(FruitFly(0, 0), "draw_body"), ["FruitFly", "Fly", "Bug"])
         self.assertEqual(list_classes_with_method(BugSpray(), "covers"), ["BugSpray", "Swatter"])
         self.assertEqual(list_classes_with_method(Chopsticks(), "covers"), ["Swatter"])
+        self.assertEqual(list_classes_with_method(RandomisedBug(0, 0), "move"), ["RandomisedBug", "Bug"])
+        self.assertEqual(list_classes_with_method(RandomisedBug(0, 0), "describe_points"), ["RandomisedBug", "Bug"])
+        self.assertEqual(list_classes_with_method(Ant(0, 0), "describe_points"), ["Bug"])
 
     def test_every_kind_inherits_from_base_class(self):
         """Test that every kind of swatter and bug inherits from its base class."""
